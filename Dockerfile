@@ -37,7 +37,9 @@ ARG BASE_PATH
 
 ENV BASE_PATH=$BASE_PATH
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV DATABASE_URL="postgresql://user:pass@localhost:5432/dummy"
+# postgresql or mysql: the Prisma client is generated for one database type
+ARG DATABASE_TYPE=postgresql
+ENV DATABASE_URL="${DATABASE_TYPE}://user:pass@localhost:5432/dummy"
 
 ARG SKIP_BUILD_GEO
 ENV SKIP_BUILD_GEO=$SKIP_BUILD_GEO
@@ -74,7 +76,8 @@ RUN printf "allowBuilds:\n  '@prisma/engines': true\n  prisma: false\nverifyDeps
 RUN pnpm add npm-run-all dotenv chalk semver \
     prisma@${PRISMA_VERSION} \
     @prisma/client@${PRISMA_VERSION} \
-    @prisma/adapter-pg@${PRISMA_VERSION}
+    @prisma/adapter-pg@${PRISMA_VERSION} \
+    @prisma/adapter-mariadb@${PRISMA_VERSION}
 
 # Assert the @prisma/engines postinstall actually downloaded the engine
 # binaries. If pnpm blocked the build script (e.g. allowBuilds not honored by
@@ -85,6 +88,7 @@ RUN ls node_modules/.pnpm/@prisma+engines@${PRISMA_VERSION}/node_modules/@prisma
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/db/mysql ./db/mysql
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/generated ./generated

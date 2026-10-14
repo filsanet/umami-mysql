@@ -71,9 +71,28 @@ describe('runQuery', () => {
     expect(prisma).toHaveBeenCalledTimes(1);
   });
 
-  test('returns undefined for an unsupported database with no clickhouse', async () => {
+  test('runs the prisma query for a mysql database without a mysql override', async () => {
     vi.stubEnv('CLICKHOUSE_URL', '');
     vi.stubEnv('DATABASE_URL', 'mysql://user:pass@localhost:3306/umami');
+    const prisma = vi.fn().mockResolvedValue('prisma-result');
+
+    await expect(db.runQuery({ prisma })).resolves.toBe('prisma-result');
+    expect(prisma).toHaveBeenCalledTimes(1);
+  });
+
+  test('prefers the mysql query for a mysql database', async () => {
+    vi.stubEnv('CLICKHOUSE_URL', '');
+    vi.stubEnv('DATABASE_URL', 'mysql://user:pass@localhost:3306/umami');
+    const mysql = vi.fn().mockResolvedValue('mysql-result');
+    const prisma = vi.fn();
+
+    await expect(db.runQuery({ mysql, prisma })).resolves.toBe('mysql-result');
+    expect(prisma).not.toHaveBeenCalled();
+  });
+
+  test('returns undefined for an unsupported database with no clickhouse', async () => {
+    vi.stubEnv('CLICKHOUSE_URL', '');
+    vi.stubEnv('DATABASE_URL', 'sqlite://umami.db');
     const prisma = vi.fn();
 
     await expect(db.runQuery({ prisma })).resolves.toBeUndefined();
@@ -96,9 +115,16 @@ describe('isRelationalOnly', () => {
     expect(db.isRelationalOnly()).toBe(false);
   });
 
-  test('returns false for unsupported non-relational databases', () => {
+  test('returns true for a mysql database without clickhouse', () => {
     vi.stubEnv('CLICKHOUSE_URL', '');
     vi.stubEnv('DATABASE_URL', 'mysql://user:pass@localhost:3306/umami');
+
+    expect(db.isRelationalOnly()).toBe(true);
+  });
+
+  test('returns false for unsupported non-relational databases', () => {
+    vi.stubEnv('CLICKHOUSE_URL', '');
+    vi.stubEnv('DATABASE_URL', 'sqlite://umami.db');
 
     expect(db.isRelationalOnly()).toBe(false);
   });

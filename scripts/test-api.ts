@@ -40,6 +40,7 @@ Usage: pnpm test:api [options] [-- playwright args]
 
 Options:
   --clickhouse        Run against Postgres + ClickHouse (analytics stored in ClickHouse)
+  --mysql             Run against MySQL instead of Postgres
   --keep              Leave the containers running after the tests finish
   --no-build          Skip the image build (use the existing UMAMI_TEST_IMAGE)
   --up-only           Start the stack, wait for readiness, and exit (see --keep)
@@ -62,6 +63,7 @@ Environment:
 
 interface Options {
   clickhouse: boolean;
+  mysql: boolean;
   keep: boolean;
   build: boolean;
   upOnly: boolean;
@@ -74,6 +76,7 @@ interface Options {
 function parseArgs(argv: string[]): Options {
   const options: Options = {
     clickhouse: false,
+    mysql: false,
     keep: false,
     build: true,
     upOnly: false,
@@ -98,6 +101,9 @@ function parseArgs(argv: string[]): Options {
     switch (arg) {
       case '--clickhouse':
         options.clickhouse = true;
+        break;
+      case '--mysql':
+        options.mysql = true;
         break;
       case '--keep':
         options.keep = true;
@@ -212,13 +218,24 @@ async function waitForHeartbeat(url: string, timeoutMs: number) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const profile = options.clickhouse ? 'clickhouse' : 'postgres';
-  const appService = options.clickhouse ? 'umami-clickhouse' : 'umami';
-  const logServices = options.clickhouse ? [appService, 'db', 'clickhouse'] : [appService, 'db'];
+  const profile = options.mysql ? 'mysql' : options.clickhouse ? 'clickhouse' : 'postgres';
+  const appService = options.mysql
+    ? 'umami-mysql'
+    : options.clickhouse
+      ? 'umami-clickhouse'
+      : 'umami';
+  const logServices = options.mysql
+    ? [appService, 'mysql']
+    : options.clickhouse
+      ? [appService, 'db', 'clickhouse']
+      : [appService, 'db'];
 
   const teardown = () => {
     console.log('\nStopping test stack...');
-    run('docker', composeArgs(['postgres', 'clickhouse'], ['down', '-v', '--remove-orphans']));
+    run(
+      'docker',
+      composeArgs(['postgres', 'clickhouse', 'mysql'], ['down', '-v', '--remove-orphans']),
+    );
   };
 
   if (EXTERNAL_TARGET && (options.upOnly || options.down)) {

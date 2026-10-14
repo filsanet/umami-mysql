@@ -1,8 +1,17 @@
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { readReplicas } from '@prisma/extension-read-replicas';
 import debug from 'debug';
 import { PrismaClient } from '@/generated/prisma/client';
-import { DATA_TYPE, DEFAULT_PAGE_SIZE, FILTER_COLUMNS, OPERATORS, SESSION_COLUMNS } from './constants';
+import {
+  DATA_TYPE,
+  DEFAULT_PAGE_SIZE,
+  FILTER_COLUMNS,
+  OPERATORS,
+  SESSION_COLUMNS,
+} from './constants';
+import { getDatabaseType, MYSQL } from './db';
+import { getMySQLPoolConfig, withMySQLDialect } from './mysql/client';
 import { filtersObjectToArray } from './params';
 import type { Operator, PropertyFilter, QueryFilters, QueryOptions } from './types';
 
@@ -13,6 +22,8 @@ const SEARCH_OPERATORS: Operator[] = [OPERATORS.contains, OPERATORS.doesNotConta
 const REGEX_OPERATORS: Operator[] = [OPERATORS.regex, OPERATORS.notRegex];
 
 const PRISMA = 'prisma';
+
+const isMySQL = () => getDatabaseType() === MYSQL;
 
 const PRISMA_LOG_OPTIONS = {
   log: [
@@ -34,7 +45,12 @@ export interface RawQueryClient extends RawQueryExecutor {
 }
 
 function isRawQueryExecutor(value: unknown): value is RawQueryExecutor {
-  return !!value && typeof value === 'object' && '$executeRawUnsafe' in value && '$queryRawUnsafe' in value;
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    '$executeRawUnsafe' in value &&
+    '$queryRawUnsafe' in value
+  );
 }
 
 export function getRawQueryClient(
@@ -87,6 +103,10 @@ function getAddIntervalQuery(field: string, interval: string): string {
 }
 
 function getDayDiffQuery(field1: string, field2: string): string {
+  if (isMySQL()) {
+    return `datediff(${field1}, ${field2})`;
+  }
+
   return `${field1}::date - ${field2}::date`;
 }
 
@@ -303,14 +323,13 @@ function parseFilters(filters: Record<string, any>, options?: QueryOptions) {
   const cohortFilters = Object.fromEntries(
     Object.entries(filters).filter(([key]) => key.startsWith('cohort_')),
   );
-  const {
-    sql: eventPropertyFilterQuery,
-    params: eventPropertyFilterParams,
-  } = getEventPropertyFilterQuery((filters as QueryFilters).eventPropertyFilters, filters.timezone);
-  const {
-    sql: sessionPropertyFilterQuery,
-    params: sessionPropertyFilterParams,
-  } = getSessionPropertyFilterQuery((filters as QueryFilters).sessionPropertyFilters, filters.timezone);
+  const { sql: eventPropertyFilterQuery, params: eventPropertyFilterParams } =
+    getEventPropertyFilterQuery((filters as QueryFilters).eventPropertyFilters, filters.timezone);
+  const { sql: sessionPropertyFilterQuery, params: sessionPropertyFilterParams } =
+    getSessionPropertyFilterQuery(
+      (filters as QueryFilters).sessionPropertyFilters,
+      filters.timezone,
+    );
 
   return {
     joinSessionQuery:
@@ -318,7 +337,11 @@ function parseFilters(filters: Record<string, any>, options?: QueryOptions) {
         ? `inner join session on website_event.session_id = session.session_id and website_event.website_id = session.website_id`
         : '',
     dateQuery: getDateQuery(filters),
-    filterQuery: [getFilterQuery(filters, options), eventPropertyFilterQuery, sessionPropertyFilterQuery]
+    filterQuery: [
+      getFilterQuery(filters, options),
+      eventPropertyFilterQuery,
+      sessionPropertyFilterQuery,
+    ]
       .filter(Boolean)
       .join('\n'),
     queryParams: {
@@ -825,7 +848,8 @@ function getSearchParameters(query: string, filters: Record<string, any>[]) {
         typeof value === 'string'
           ? {
               [value]: query,
-              mode: 'insensitive',
+              // MySQL tables use a case-insensitive collation and reject `mode`.
+              ...(!isMySQL() && { mode: 'insensitive' }),
             }
           : parseFilter(value),
     };
@@ -851,6 +875,10 @@ export function getSchema() {
     throw new Error('DATABASE_URL is not set.');
   }
 
+  if (isMySQL()) {
+    return null;
+  }
+
   const connectionUrl = new URL(databaseUrl);
 
   return connectionUrl.searchParams.get('schema');
@@ -867,7 +895,12 @@ function getClient() {
 
   const schema = getSchema();
 
-  const baseAdapter = new PrismaPg({ connectionString: url }, { schema });
+  const createAdapter = (connectionString: string) =>
+    isMySQL()
+      ? new PrismaMariaDb(getMySQLPoolConfig(connectionString))
+      : new PrismaPg({ connectionString }, { schema });
+
+  const baseAdapter = createAdapter(url);
 
   const baseClient = new PrismaClient({
     adapter: baseAdapter,
@@ -881,11 +914,11 @@ function getClient() {
 
   if (!replicaUrl) {
     log('Prisma initialized');
-    globalThis[PRISMA] ??= baseClient;
-    return baseClient;
+    globalThis[PRISMA] ??= withMySQLDialect(baseClient);
+    return globalThis[PRISMA] as typeof baseClient;
   }
 
-  const replicaAdapter = new PrismaPg({ connectionString: replicaUrl }, { schema });
+  const replicaAdapter = createAdapter(replicaUrl);
 
   const replicaClient = new PrismaClient({
     adapter: replicaAdapter,
@@ -897,9 +930,9 @@ function getClient() {
     replicaClient.$on('query', log);
   }
 
-  const extended = baseClient.$extends(
+  const extended = withMySQLDialect(baseClient).$extends(
     readReplicas({
-      replicas: [replicaClient],
+      replicas: [withMySQLDialect(replicaClient)],
     }),
   );
 

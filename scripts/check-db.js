@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process';
 import { PrismaPg } from '@prisma/adapter-pg';
 import chalk from 'chalk';
 import { PrismaClient } from '../generated/prisma/client.js';
+import { checkMySQLVersion, createMySQLAdapter, isMySQL } from './mysql/check-db.js';
 
 const MIN_VERSION = '9.4.0';
 const MIN_VERSION_NUM = 90400;
@@ -15,10 +16,9 @@ if (process.env.SKIP_DB_CHECK) {
 
 const url = new URL(process.env.DATABASE_URL);
 
-const adapter = new PrismaPg(
-  { connectionString: url.toString() },
-  { schema: url.searchParams.get('schema') },
-);
+const adapter = isMySQL()
+  ? createMySQLAdapter(url.toString())
+  : new PrismaPg({ connectionString: url.toString() }, { schema: url.searchParams.get('schema') });
 
 const prisma = new PrismaClient({ adapter });
 
@@ -53,6 +53,12 @@ async function checkConnection() {
 }
 
 async function checkDatabaseVersion() {
+  if (isMySQL()) {
+    await checkMySQLVersion(prisma);
+    success('Database version check successful.');
+    return;
+  }
+
   const query = await prisma.$queryRaw`select current_setting('server_version_num') as version_num`;
   const version = Number(query[0]?.version_num);
 
