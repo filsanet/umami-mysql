@@ -102,4 +102,7 @@ async function applyMigration() {
       }
     }
   }
+
+  // The MySQL driver's pool keeps the process alive until it is closed.
+  await prisma.$disconnect();
 })();
