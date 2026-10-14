@@ -38,6 +38,9 @@ export function getMySQLPoolConfig(connectionString: string): PoolConfig {
     acquireTimeout: seconds('pool_timeout'),
     connectTimeout: seconds('connect_timeout'),
     ...(ssl && { ssl }),
+    // MySQL 8's default caching_sha2_password needs the server's RSA key on a
+    // non-TLS connection whenever its auth cache is cold (e.g. after a restart).
+    allowPublicKeyRetrieval: params.get('allowPublicKeyRetrieval') !== 'false',
     initSql: MYSQL_SESSION_SQL,
   };
 }

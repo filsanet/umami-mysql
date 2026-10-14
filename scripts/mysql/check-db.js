@@ -11,7 +11,12 @@ export function isMySQL(url = process.env.DATABASE_URL) {
 
 export function createMySQLAdapter(url) {
   // The mariadb driver only accepts the mariadb:// scheme.
-  return new PrismaMariaDb(url.replace(/^mysql:/, 'mariadb:'));
+  const mariadbUrl = new URL(url.replace(/^mysql:/, 'mariadb:'));
+  // Needed by caching_sha2_password on non-TLS connections (see src/lib/mysql/client.ts).
+  if (!mariadbUrl.searchParams.has('allowPublicKeyRetrieval')) {
+    mariadbUrl.searchParams.set('allowPublicKeyRetrieval', 'true');
+  }
+  return new PrismaMariaDb(mariadbUrl.toString());
 }
 
 export async function checkMySQLVersion(prisma) {

@@ -15,6 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createMySQLAdapter } from './check-db.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const migrationsDir = resolve(root, 'db/mysql/migrations');
@@ -45,10 +46,30 @@ export function applyCollations(sql) {
   );
 }
 
-function diff() {
+// Prisma replays the migrations into the shadow database but does not create it.
+async function ensureShadowDatabase() {
+  const url = new URL(process.env.SHADOW_DATABASE_URL);
+  const name = decodeURIComponent(url.pathname.slice(1));
+  url.pathname = '/mysql'; // connect through the always-present system database
+
+  const adapter = await createMySQLAdapter(url.toString()).connect();
+  try {
+    await adapter.executeRaw({
+      sql: `create database if not exists \`${name.replace(/`/g, '``')}\``,
+      args: [],
+      argTypes: [],
+    });
+  } finally {
+    await adapter.dispose();
+  }
+}
+
+async function diff() {
   if (!process.env.SHADOW_DATABASE_URL) {
     throw new Error('SHADOW_DATABASE_URL must point to a scratch MySQL database.');
   }
+
+  await ensureShadowDatabase();
 
   const output = execFileSync(
     'npx',
@@ -79,7 +100,7 @@ const [command, name] = process.argv.slice(2);
 if (command === 'create') {
   if (!name) throw new Error('Usage: migrations.js create <name>');
 
-  const sql = diff();
+  const sql = await diff();
 
   if (isEmpty(sql)) {
     console.log('MySQL schema and migrations are already in sync.');
@@ -91,7 +112,7 @@ if (command === 'create') {
   writeFileSync(resolve(dir, 'migration.sql'), applyCollations(sql));
   console.log(`Wrote ${dir}/migration.sql`);
 } else if (command === 'check') {
-  const sql = diff();
+  const sql = await diff();
 
   if (!isEmpty(sql)) {
     console.error('db/mysql/migrations is missing changes from db/mysql/schema.prisma:\n');
