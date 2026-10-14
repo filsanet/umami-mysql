@@ -8,9 +8,16 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+  # Called by upstream-sync.yml to test a merge before it lands on master.
+  workflow_call:
+    inputs:
+      ref:
+        description: Branch to test
+        required: true
+        type: string
 
 concurrency:
-  group: mysql-${{ github.ref }}
+  group: mysql-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -26,6 +33,8 @@ jobs:
       SKIP_DB_CHECK: 1
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -36,6 +45,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: MySQL schema matches prisma/schema.prisma
         run: pnpm mysql:schema:check
+      - name: Every raw SQL query has a parity case
+        run: pnpm mysql:coverage
       - run: pnpm build:packages
       - run: pnpm test
 
@@ -68,6 +79,8 @@ jobs:
       DATABASE_URL: mysql://root:umami@localhost:3306/umami
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -86,6 +99,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}

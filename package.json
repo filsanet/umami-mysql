@@ -62,6 +62,7 @@
     "test:api:mysql": "tsx scripts/test-api.ts --mysql",
     "test:mysql:parity": "tsx scripts/mysql/parity.ts",
     "mysql:schema": "node scripts/mysql/generate-schema.js",
+    "mysql:coverage": "tsx scripts/mysql/check-coverage.ts",
     "mysql:schema:check": "node scripts/mysql/generate-schema.js --check",
     "mysql:migrations:create": "node scripts/mysql/migrations.js create",
     "mysql:migrations:check": "node scripts/mysql/migrations.js check",

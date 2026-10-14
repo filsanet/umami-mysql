@@ -16,12 +16,12 @@
  *   --keep-results    keep the raw result files in tests/mysql/parity/.results
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { compareResults, type Results } from '../../tests/mysql/parity/compare';
+import { createMySQLAdapter } from './check-db.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const RESULTS_DIR = path.join(ROOT, 'tests/mysql/parity/.results');
@@ -48,7 +48,7 @@ const scratchName = `umami_parity_${Date.now().toString(36)}_${process.pid}`;
 async function execute(type: string, serverUrl: string, sql: string) {
   const factory =
     type === 'mysql'
-      ? new PrismaMariaDb(serverUrl.replace(/^mysql:/, 'mariadb:'))
+      ? createMySQLAdapter(serverUrl)
       : new PrismaPg({ connectionString: serverUrl });
   const adapter = await factory.connect();
 
@@ -117,6 +117,25 @@ console.log(
   `\n${count('match')} match, ${count('order')} differ only in row order, ` +
     `${count('both-error')} fail on both, ${failures.length} failing (of ${comparisons.length}).`,
 );
+
+// On GitHub Actions, list the failing queries on the run page.
+if (process.env.GITHUB_STEP_SUMMARY) {
+  const lines = [
+    '## PostgreSQL/MySQL parity',
+    '',
+    `${count('match')} match, ${count('order')} differ only in row order, ${count('both-error')} fail on both, **${failures.length} failing** (of ${comparisons.length}).`,
+  ];
+
+  if (failures.length) {
+    lines.push('', '| Query | Status | Detail |', '| --- | --- | --- |');
+    for (const c of failures) {
+      const detail = (c.detail ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').slice(0, 300);
+      lines.push(`| \`${c.name}\` | ${c.status} | ${detail} |`);
+    }
+  }
+
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+}
 
 if (!keep) rmSync(RESULTS_DIR, { recursive: true, force: true });
 

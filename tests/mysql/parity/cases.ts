@@ -524,6 +524,11 @@ export async function getCases(): Promise<ParityCase[]> {
     );
   }
 
+  add('getRealtimeActivity', () => sql.getRealtimeActivity(WEBSITE_ID, base()));
+  add('getRealtimeActivity/filtered', () =>
+    sql.getRealtimeActivity(WEBSITE_ID, base(FILTERS.countryCity)),
+  );
+
   // Realtime (relative to the current time)
   add('getActiveVisitors', () => sql.getActiveVisitors(WEBSITE_ID), true);
   add(

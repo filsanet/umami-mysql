@@ -15,6 +15,15 @@
   <a href="https://cloud.umami.is/share/LGazGOecbDtaIwDr/umami.is" style="text-decoration: none;"><img src="https://img.shields.io/badge/Try%20Demo%20Now-Click%20Here-brightgreen" alt="Umami Demo" /></a>
 </p>
 
+> [!NOTE]
+> **This fork adds MySQL 8.0+ support.** Set `DATABASE_URL=mysql://user:password@host:3306/db`
+> instead of a PostgreSQL URL, build as usual, or run the
+> `ghcr.io/filsanet/umami-mysql:mysql-latest` image (see `docker-compose.mysql.yml`).
+> MySQL needs its time zone tables loaded (the official Docker image and most managed
+> services have them). MariaDB and migrating existing PostgreSQL data are not supported.
+> The fork follows upstream nightly and only advances when every report query returns the
+> same results on MySQL as on PostgreSQL; see [MAINTAINING.md](MAINTAINING.md).
+
 ---
 
 ## 🚀 Getting Started
