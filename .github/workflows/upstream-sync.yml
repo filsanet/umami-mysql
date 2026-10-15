@@ -1,0 +1,209 @@
+name: Upstream sync
+
+# Nightly: merge umami-software/umami master into this fork, regenerate the
+# MySQL schema and migration, run the full MySQL test matrix on the merge and
+# fast-forward master if everything passes. Any failure opens (or updates) one
+# issue labelled `upstream-sync` with the reason. See MAINTAINING.md.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  PNPM_VERSION: 12.3.4
+  NODE_VERSION: 22
+  UPSTREAM: https://github.com/umami-software/umami.git
+
+jobs:
+  merge:
+    name: Merge upstream
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.check.outputs.version }}
+      sha: ${{ steps.check.outputs.sha }}
+      branch: ${{ steps.check.outputs.branch }}
+      conflicts: ${{ steps.merge.outputs.conflicts }}
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: umami
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pumami --silent"
+          --health-interval 2s --health-retries 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+          # GITHUB_TOKEN cannot push changes to .github/workflows. Set SYNC_TOKEN
+          # (see MAINTAINING.md) so merges that touch upstream workflows can land.
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          git remote add upstream "$UPSTREAM"
+          git fetch --no-tags upstream master
+          sha=$(git rev-parse --short upstream/master)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "branch=upstream-sync/$sha" >> "$GITHUB_OUTPUT"
+          echo "version=$(git show upstream/master:package.json | jq -r .version)" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor upstream/master HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already up to date with upstream $sha."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.check.outputs.changed == 'true'
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.changed == 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Merge
+        id: merge
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${{ steps.check.outputs.branch }}"
+
+          if ! git merge --no-edit upstream/master; then
+            # The lockfile is regenerated rather than merged by hand.
+            git checkout --theirs pnpm-lock.yaml 2>/dev/null && git add pnpm-lock.yaml || true
+            conflicts=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+            if [ -n "$conflicts" ]; then
+              echo "conflicts=$conflicts" >> "$GITHUB_OUTPUT"
+              echo "::error::Merge conflicts in: $conflicts"
+              exit 1
+            fi
+            git commit --no-edit
+          fi
+
+          pnpm install --lockfile-only
+          pnpm install --frozen-lockfile
+
+      - name: Regenerate MySQL schema and migration
+        if: steps.check.outputs.changed == 'true'
+        env:
+          DATABASE_URL: mysql://root:umami@localhost:3306/umami
+          SHADOW_DATABASE_URL: mysql://root:umami@localhost:3306/umami_shadow
+        run: |
+          pnpm mysql:schema
+          # Name the MySQL migration after upstream's newest Postgres migration.
+          name=$(ls prisma/migrations | grep -v '\.toml$' | sort | tail -1)
+          if [ ! -d "db/mysql/migrations/$name" ]; then
+            pnpm mysql:migrations:create "$name"
+          fi
+          pnpm mysql:migrations:check
+
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Update MySQL schema for upstream ${{ steps.check.outputs.version }} (${{ steps.check.outputs.sha }})"
+          fi
+
+      - name: Push sync branch
+        if: steps.check.outputs.changed == 'true'
+        run: git push --force origin "HEAD:refs/heads/${{ steps.check.outputs.branch }}"
+
+  test:
+    name: Test
+    needs: merge
+    if: needs.merge.outputs.changed == 'true'
+    uses: ./.github/workflows/mysql.yml
+    with:
+      ref: ${{ needs.merge.outputs.branch }}
+
+  land:
+    name: Fast-forward master
+    needs: [merge, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.merge.outputs.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+      - name: Push to master
+        run: |
+          git push origin "HEAD:refs/heads/master"
+          git push origin --delete "${{ needs.merge.outputs.branch }}"
+      - name: Close open sync issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh issue list --label upstream-sync --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Upstream ${{ needs.merge.outputs.version }} (${{ needs.merge.outputs.sha }}) merged and passed all MySQL checks."
+          done
+
+  docker:
+    name: Publish image
+    needs: land
+    uses: ./.github/workflows/docker-mysql.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      ref: master
+
+  report:
+    name: Report failure
+    needs: [merge, test, land]
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the sync issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CONFLICTS: ${{ needs.merge.outputs.conflicts }}
+          VERSION: ${{ needs.merge.outputs.version }}
+          SHA: ${{ needs.merge.outputs.sha }}
+          BRANCH: ${{ needs.merge.outputs.branch }}
+          MERGE: ${{ needs.merge.result }}
+          TEST: ${{ needs.test.result }}
+          LAND: ${{ needs.land.result }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -n "$CONFLICTS" ]; then
+            reason="Upstream changed files this fork also changes, and git could not merge them: \`$CONFLICTS\`. Merge \`umami-software/umami\` master by hand (see MAINTAINING.md)."
+          elif [ "$MERGE" = "failure" ]; then
+            reason="The merge job failed after merging: install, schema or migration generation, or the push was refused because upstream changed .github/workflows and SYNC_TOKEN is not set (see MAINTAINING.md). See the run log."
+          elif [ "$TEST" = "failure" ]; then
+            reason="The merge is on branch \`$BRANCH\`, but MySQL checks failed on it. The run summary lists failing parity queries; fix them on that branch (see MAINTAINING.md)."
+          else
+            reason="Tests passed but master could not be fast-forwarded. Either master moved during the run (re-run the workflow) or it is protected (see MAINTAINING.md)."
+          fi
+
+          body="Upstream sync to umami ${VERSION} (\`${SHA}\`) did not land.
+
+          ${reason}
+
+          Run: ${RUN}"
+
+          gh label create upstream-sync --color D93F0B --description "Nightly upstream merge needs attention" 2>/dev/null || true
+          existing=$(gh issue list --label upstream-sync --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --label upstream-sync --title "Upstream sync failed" --body "$body"
+          fi

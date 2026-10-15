@@ -1,0 +1,122 @@
+name: MySQL
+
+# MySQL support checks for this fork. Upstream's own CI (ci.yml) only runs in
+# umami-software/umami.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+  # Called by upstream-sync.yml to test a merge before it lands on master.
+  workflow_call:
+    inputs:
+      ref:
+        description: Branch to test
+        required: true
+        type: string
+
+concurrency:
+  group: mysql-${{ inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 12.3.4
+  NODE_VERSION: 22
+
+jobs:
+  unit:
+    name: Unit tests and schema checks
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/dummy
+      SKIP_DB_CHECK: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: MySQL schema matches prisma/schema.prisma
+        run: pnpm mysql:schema:check
+      - name: Every raw SQL query has a parity case
+        run: pnpm mysql:coverage
+      - run: pnpm build:packages
+      - run: pnpm test
+
+  parity:
+    name: PostgreSQL/MySQL parity
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: umami
+          POSTGRES_PASSWORD: umami
+          POSTGRES_DB: umami
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U umami" --health-interval 2s --health-retries 30
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: umami
+          MYSQL_DATABASE: umami
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pumami --silent"
+          --health-interval 2s --health-retries 60
+    env:
+      PARITY_POSTGRES_URL: postgresql://umami:umami@localhost:5432/umami
+      PARITY_MYSQL_URL: mysql://root:umami@localhost:3306/umami
+      SHADOW_DATABASE_URL: mysql://root:umami@localhost:3306/umami_shadow
+      DATABASE_URL: mysql://root:umami@localhost:3306/umami
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: MySQL migrations match the MySQL schema
+        run: pnpm mysql:migrations:check
+      - name: Query results match PostgreSQL
+        run: pnpm test:mysql:parity
+
+  api:
+    name: API suite on MySQL
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:api:mysql
+        env:
+          CI: true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: api-mysql-report
+          path: |
+            playwright-report/api
+            tests/api/.runtime
+          retention-days: 7

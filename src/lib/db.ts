@@ -1,5 +1,6 @@
 export const PRISMA = 'prisma';
 export const POSTGRESQL = 'postgresql';
+export const MYSQL = 'mysql';
 export const CLICKHOUSE = 'clickhouse';
 export const KAFKA = 'kafka';
 export const KAFKA_PRODUCER = 'kafka-producer';
@@ -20,7 +21,13 @@ export function getDatabaseType(url = process.env.DATABASE_URL) {
 }
 
 export function isRelationalOnly() {
-  return !process.env.CLICKHOUSE_URL && getDatabaseType() === POSTGRESQL;
+  return !process.env.CLICKHOUSE_URL && isRelational();
+}
+
+export function isRelational() {
+  const db = getDatabaseType();
+
+  return db === POSTGRESQL || db === MYSQL;
 }
 
 export async function runQuery(queries: any) {
@@ -36,6 +43,10 @@ export async function runQuery(queries: any) {
 
   if (db === POSTGRESQL) {
     return queries[PRISMA]();
+  }
+
+  if (db === MYSQL) {
+    return (queries[MYSQL] ?? queries[PRISMA])();
   }
 }
 

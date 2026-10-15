@@ -1,0 +1,39 @@
+---
+# Umami with MySQL 8: docker compose -f docker-compose.mysql.yml up -d
+services:
+  umami:
+    image: ghcr.io/filsanet/umami-mysql:mysql-latest
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: mysql://umami:umami@db:3306/umami
+      APP_SECRET: replace-me-with-a-random-string
+      # Required for two-factor authentication, generate with: openssl rand -hex 32
+      TWO_FACTOR_ENCRYPTION_KEY: replace-me-with-a-64-character-hex-string
+    depends_on:
+      db:
+        condition: service_healthy
+    init: true
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "curl http://localhost:3000/api/heartbeat"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: umami
+      MYSQL_USER: umami
+      MYSQL_PASSWORD: umami
+      MYSQL_ROOT_PASSWORD: replace-me
+    volumes:
+      - umami-mysql-data:/var/lib/mysql
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uumami -pumami --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  umami-mysql-data:
