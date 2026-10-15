@@ -11,7 +11,8 @@ permissions:
 jobs:
   scan:
     name: Scan for secrets
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # Blacksmith runners only exist for umami-software; forks use GitHub-hosted ones.
+    runs-on: ${{ github.repository == 'umami-software/umami' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
 
     steps:
       - uses: actions/checkout@v6
