@@ -40,6 +40,11 @@ x-umami-env: &umami-env
   DISABLE_TELEMETRY: "1"
   DISABLE_UPDATES: "1"
   MCP_ENABLED: "1"
+  # Trusted proxy sign-in; only requests carrying these headers are affected.
+  AUTH_PROXY_USER_HEADER: X-Test-Proxy-User
+  AUTH_PROXY_EMAIL_HEADER: X-Test-Proxy-Mail
+  AUTH_PROXY_NAME_HEADER: X-Test-Proxy-Name
+  AUTH_PROXY_ACCESS_URL: https://intranet.example.com/umami-access
 
 services:
   db:

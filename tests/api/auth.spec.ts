@@ -126,4 +126,60 @@ test.describe('Auth', () => {
     expect(anonymous.status).toBe(401);
     expect(viaApiKey.status).toBe(401);
   });
+
+  test('POST /api/auth/proxy signs in the user named by the proxy headers', async ({
+    api,
+    seed,
+  }) => {
+    const response = await api
+      .with({ 'X-Test-Proxy-User': seed.user.username.toUpperCase() })
+      .post('/api/auth/proxy');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      token: expect.any(String),
+      user: { id: seed.user.id, username: seed.user.username, role: 'user', isAdmin: false },
+    });
+
+    const me = await api
+      .bearer(response.body.token)
+      .with({ 'X-Test-Proxy-User': seed.user.username })
+      .get('/api/me');
+
+    expect(me.status).toBe(200);
+    expect(me.body.user).toMatchObject({ id: seed.user.id });
+
+    // A session is rejected once the proxy vouches for someone else.
+    const switched = await api
+      .bearer(response.body.token)
+      .with({ 'X-Test-Proxy-User': seed.admin.username })
+      .get('/api/me');
+
+    expect(switched.status).toBe(401);
+  });
+
+  test('POST /api/auth/proxy falls back to the email header', async ({ api, seed }) => {
+    const response = await api
+      .with({ 'X-Test-Proxy-User': 'no-such-proxy-id', 'X-Test-Proxy-Mail': seed.admin.username })
+      .post('/api/auth/proxy');
+
+    expect(response.status).toBe(200);
+    expect(response.body.user).toMatchObject({ id: seed.admin.id, isAdmin: true });
+  });
+
+  test('POST /api/auth/proxy explains how to get access to unknown users', async ({ api }) => {
+    const unknown = await api
+      .with({ 'X-Test-Proxy-User': 'no-such-proxy-id', 'X-Test-Proxy-Name': 'Pat Example' })
+      .post('/api/auth/proxy');
+    const anonymous = await api.post('/api/auth/proxy');
+
+    expect(unknown.status).toBe(403);
+    expect(unknown.body.error).toMatchObject({
+      code: 'proxy-auth-no-user',
+      name: 'Pat Example',
+      accessUrl: 'https://intranet.example.com/umami-access',
+    });
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.body.error).toMatchObject({ code: 'proxy-auth-missing' });
+  });
 });
