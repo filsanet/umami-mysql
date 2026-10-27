@@ -200,6 +200,16 @@ jobs:
 
           Run: ${RUN}"
 
+          # Always surface the reason on the run itself, so it is visible even
+          # when the issue below cannot be filed.
+          echo "$body" >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=Upstream sync did not land::${reason}"
+
+          if [ "$(gh api "repos/$GH_REPO" --jq .has_issues)" != "true" ]; then
+            echo "::warning::Issues are disabled on $GH_REPO, so no upstream-sync issue was opened. Enable them under Settings → General → Features to get notified."
+            exit 0
+          fi
+
           gh label create upstream-sync --color D93F0B --description "Nightly upstream merge needs attention" 2>/dev/null || true
           existing=$(gh issue list --label upstream-sync --state open --json number --jq '.[0].number')
           if [ -n "$existing" ]; then

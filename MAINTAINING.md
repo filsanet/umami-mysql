@@ -52,6 +52,8 @@ Every push and pull request runs `.github/workflows/mysql.yml`:
 
 - **Actions permissions**: Settings → Actions → General → Workflow permissions →
   "Read and write permissions".
+- **Issues**: Settings → General → Features → Issues must be enabled, or a failed sync has
+  nowhere to report and only shows up as a red run (with the reason in its summary).
 - **`SYNC_TOKEN` secret (recommended)**: the default Actions token cannot push changes to
   `.github/workflows`, so a sync that includes upstream workflow changes fails at the push.
   Create a fine-grained personal access token for this repository with *Contents* and
