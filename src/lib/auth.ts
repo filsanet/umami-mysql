@@ -16,6 +16,7 @@ import {
 } from '@/lib/constants';
 import { createAuthKey, hash, secret } from '@/lib/crypto';
 import { createSecureToken, parseSecureToken, parseToken } from '@/lib/jwt';
+import { getProxyIdentity, proxyIdentityMatches } from '@/lib/proxy-auth';
 import redis from '@/lib/redis';
 import { ensureArray } from '@/lib/utils';
 import { getApiKeyByHash, updateApiKeyLastUsed } from '@/queries/prisma/apiKey';
@@ -109,6 +110,15 @@ export async function checkAuth(request: Request) {
         user = null;
       }
     }
+  }
+
+  // Behind an authenticating proxy, a session must belong to the user the proxy vouches for.
+  // A different person on the same browser gets signed out instead of reusing the old session.
+  const proxyIdentity = user ? getProxyIdentity(request) : null;
+
+  if (proxyIdentity && !proxyIdentityMatches(proxyIdentity, user.username)) {
+    log('Session user does not match proxy identity');
+    user = null;
   }
 
   log({

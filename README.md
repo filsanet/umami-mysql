@@ -63,6 +63,9 @@ Optional: set `TWO_FACTOR_ENCRYPTION_KEY` to a 64-character hex string to enable
 authentication. Generate one with `openssl rand -hex 32`. Two-factor authentication is unavailable
 and cannot be required until this key is set.
 
+Optional: to sign users in through a corporate SSO reverse proxy that injects identity headers,
+set `AUTH_PROXY_USER_HEADER` and related variables. See [docs/proxy-auth.md](docs/proxy-auth.md).
+
 MCP is disabled by default. Set `MCP_ENABLED=1` to enable the `/mcp` endpoint, then
 authenticate with an API key generated under Settings → API keys.
 
