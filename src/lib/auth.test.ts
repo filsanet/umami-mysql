@@ -283,3 +283,59 @@ describe('checkAuth password fingerprint', () => {
     expect(result).toBeNull();
   });
 });
+
+describe('checkAuth proxy identity', () => {
+  function proxiedRequest(headers: Record<string, string>) {
+    return new Request('http://localhost/api/test', {
+      headers: { authorization: 'Bearer secure-token', ...headers },
+    });
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('AUTH_PROXY_USER_HEADER', 'X-NOM-USER');
+    vi.stubEnv('AUTH_PROXY_EMAIL_HEADER', 'X-NOM-MAIL');
+    parseSecureTokenMock.mockReturnValue({ userId: 'user-1' } as any);
+    mockUser();
+  });
+
+  test('authorizes a session whose user matches the proxy user id', async () => {
+    const auth = await checkAuth(proxiedRequest({ 'x-nom-user': 'BOB' }));
+
+    expect(auth?.user?.id).toBe('user-1');
+  });
+
+  test('authorizes a session whose user matches the proxy email', async () => {
+    getUserMock.mockResolvedValue({
+      id: 'user-1',
+      username: 'bob@example.com',
+      role: 'user',
+      password: PASSWORD_HASH,
+    } as any);
+
+    const auth = await checkAuth(
+      proxiedRequest({ 'x-nom-user': 'b12345', 'x-nom-mail': 'Bob@example.com' }),
+    );
+
+    expect(auth?.user?.id).toBe('user-1');
+  });
+
+  test('rejects a session that belongs to a different user than the proxy identity', async () => {
+    const auth = await checkAuth(proxiedRequest({ 'x-nom-user': 'alice' }));
+
+    expect(auth).toBeNull();
+  });
+
+  test('keeps the session when the proxy headers are absent', async () => {
+    const auth = await checkAuth(proxiedRequest({}));
+
+    expect(auth?.user?.id).toBe('user-1');
+  });
+
+  test('ignores proxy headers when proxy auth is not configured', async () => {
+    vi.stubEnv('AUTH_PROXY_USER_HEADER', '');
+
+    const auth = await checkAuth(proxiedRequest({ 'x-nom-user': 'alice' }));
+
+    expect(auth?.user?.id).toBe('user-1');
+  });
+});

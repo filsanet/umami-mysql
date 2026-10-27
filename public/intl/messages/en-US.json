@@ -1,6 +1,7 @@
 {
   "label": {
     "access-code": "Access code",
+    "access-instructions": "How to get access",
     "account": "Account",
     "action": "Action",
     "actions": "Actions",
@@ -464,6 +465,8 @@
     "no-team-websites": "This team does not have any websites.",
     "no-teams": "You have not created any teams.",
     "no-users": "There are no users.",
+    "proxy-no-access": "Hi {name}, you don't have access to Umami yet.",
+    "proxy-no-access-contact": "Ask your administrator to set up your account.",
     "no-websites-configured": "You do not have any websites configured.",
     "not-found": "Not found",
     "nothing-selected": "Nothing selected.",
